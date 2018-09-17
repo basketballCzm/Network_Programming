@@ -1,7 +1,7 @@
 # Network_Programming
 一些常见的网络编程问题
 
-## 5种I/O模式
+### 5种I/O模式
 1. 阻塞I/O(Linux下的I/O操作默认使阻塞I/O，即open和socket创建的I/O都是阻塞I/O)
 阻塞I/O：当没有数据到达时，系统进程处于阻塞状态，进程让出CPU，进入休息队列，等有数据到达时，内核会唤醒数据读取数据(数据拷贝)
 
@@ -76,11 +76,23 @@ epoll的工作模式
 epoll有两种工作模式LT和ET：
 令人高兴的是，2.6内核的epoll比其2.5开发版本的/dev/epoll简洁了许多，所以，大部分情况下，强大的东西往往是简单的。唯一有点麻烦 是epoll有2种工作方式:LT和ET。
 
-1. LT(level triggered)缺省的工作方式，并且同时支持block和no-block socket。在这种做法中，内核告诉你一个文件描述符是否就绪了，然后你可以对这个就绪的 fd进行IO操作。如果你不作任何操作，内核还是会继续通知你，所以，这种模式编程出错误可能性要小一点。传统的select/poll都是这种模型的代表。
+1. LT(level triggered)缺省的工作方式，并且同时支持block和no-blocksocket。在这种做法中，内核告诉你一个文件描述符是否就绪了，然后你可以对这个就绪的 fd进行IO操作。如果你不作任何操作，内核还是会继续通知你，所以，这种模式编程出错误可能性要小一点。传统的select/poll都是这种模型的代表。
 2. ET(edge-triggered)是高速工作方式，只支持no-block socket。在这种模式下，当描述符从未就绪变为就绪时，内核通过epoll告诉你。然后它会假设你知道文件描述符已经就绪，并且不会再为那个文件描述符发送更多的就绪通知，直到你做了某些操作导致那个文件描述符不再为就绪状态了（比如，你在发送，接收或者接收请求，或者发送接收的数据少于一定量时导致了一个EWOULDBLOCK错误）。但是请注意，如果一直不对这个fd作IO操作(从而导致它再次变成未就绪)，内核不会发送更多的通知(only once),不过在TCP协议中，ET模式的加速效用仍需要更多的benchmark确认。epoll只有epoll_create,epoll_ctl,epoll_wait 3个系统调用，具体用法请参考http://www.xmailserver.org/linux-patches/nio-improve.html，在http://www.kegel.com/rn/也有一个完整的例子，大家一看就知道如何使用了
 Leader/follower模式线程pool实现，以及和epoll的配合。
 
 epoll 的使用方法
+首先通过create_epoll(int maxfds)来创建一个epoll的句柄，其中maxfds为你epoll所支持的最大句柄数。这个函数会返回一个新的epoll句柄，之后的所有操作将通过这个句柄来进行操作。在用完之后，记得用close()来关闭这个创建出来的epoll句柄。之后在你的网络主循环里面，每一帧的调用epoll_wait(int epfd,epoll_event events, int max_events, int timeout)来查询所有的网络接口，看哪一个可以读，哪一个可以写了。基本的语法为nfds = epoll_wait(kdpfd, events, maxevents, -1);其中kdpfd为用epoll_create创建之后的句柄，events是一个 epoll_event的指针，当epoll_wait这个函数操作成功之后，epoll_events里面将储存所有的读写事件。max_events是当前需要监听的所有socket句柄数。最后一个timeout是 epoll_wait的超时，为0的时候表示马上返回，为-1的时候表示一直等下去，直到有事件范围，为任意正整数的时候表示等这么长的时间，如果一直没 有事件，则范围。一般如果网络主循环是单独的线程的话，可以用-1来等，这样可以保证一些效率，如果是和主逻辑在同一个线程的话，则可以用0来保证主循环 的效率 
+
+
+epoll模型主要负责对大量并发用户的请求及时处理，完成服务器和客户端的数据交互，具体步骤:
+1. 使用epoll_create() 函数创建文件描述，设定将可管理的最大socket描述符数目。
+2. 创建与epoll关联的接收线程，应用程序可以创建多个接收线程来处理epoll上的读通知事件，线程的数目依赖程序的具体需要。
+3. 创建一个侦听socket描述符ListenSock；将该描述符设定为非阻塞模式，调用Listen（）函数在套接字上侦听有无新的连接请求，在 epoll_event结构中设置要处理的事件类型EPOLLIN，工作方式为 epoll_ET，以提高工作效率，同时使用epoll_ctl()注册事件，最后启动网络监视线程。
+4. 网络监视线程启动循环，epoll_wait()等待epoll事件的发生。
+5. 如果epoll事件表明有新的连接请求，则调用accept（）函数，将用户socket描述符添加到epoll_data联合体，同时设定该描述符为非 阻塞，并在epoll_event结构中设置要处理的事件类型为读和写，工作方式为epoll_ET。
+6. 如果epoll事件表明socket描述符上的数据可读，则将该socket描述符加入可读队列，通知接收线程读入数据，并将收到的数据放入到接收数据的链表中，经过逻辑处理后将反馈的数据包放入到发送数据链表中，等待由发送线程发送。
+
+
 https://blog.csdn.net/chenchong_219/article/details/35822803
 
 
